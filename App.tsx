@@ -1,7 +1,7 @@
+import { Picker } from '@react-native-picker/picker';
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
-
+//gün2 katagori
 const WORK_MINUTES = 25;
 
 function formatTime(totalSeconds: number) {
@@ -48,6 +48,7 @@ export default function App() {
       <Text style={styles.title}>Odaklanma Zamanlayıcısı</Text>
       <Text style={styles.subtitle}>25 dakikalık çalışma seansı</Text>
       <View style={{ marginBottom: 20 }}>
+      
         <Picker
           selectedValue={category}
           onValueChange={(itemValue) => setCategory(itemValue)}
