@@ -8,6 +8,8 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
+import { NavigationContainer } from '@react-navigation/native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 const WORK_MINUTES = 25;
 
@@ -26,7 +28,7 @@ function formatTime(totalSeconds: number) {
   return `${minutes}:${seconds}`;
 }
 
-export default function App() {
+function HomeScreen() {
   const [secondsLeft, setSecondsLeft] = useState(WORK_MINUTES * 60);
   const [isRunning, setIsRunning] = useState(false);
   const [category, setCategory] = useState('Ders');
@@ -164,9 +166,10 @@ export default function App() {
                 Kategori: {session.category}
               </Text>
               <Text style={styles.sessionText}>
-                Süre: {Math.floor(session.durationSeconds / 60)} dakika {session.durationSeconds % 60} saniye
-                </Text>
-
+                Süre:{' '}
+                {Math.floor(session.durationSeconds / 60)} dakika{' '}
+                {session.durationSeconds % 60} saniye
+              </Text>
               <Text style={styles.sessionText}>
                 Tarih:{' '}
                 {new Date(session.createdAt).toLocaleString('tr-TR', {
@@ -179,6 +182,52 @@ export default function App() {
         )}
       </ScrollView>
     </View>
+  );
+}
+
+function ReportsScreen() {
+  return (
+    <View style={styles.reportsContainer}>
+      <Text style={styles.title}>Raporlar</Text>
+      <Text style={styles.reportsSubtitle}>
+        Yakında burada toplam süre, en çok kullanılan kategori vb. istatistikler
+        olacak.
+      </Text>
+      <Text style={{ color: '#9ca3af', marginTop: 8 }}>
+        Şu anki commit: Tab Navigator + ayrı Raporlar ekranı.
+      </Text>
+    </View>
+  );
+}
+
+const Tab = createBottomTabNavigator();
+
+export default function App() {
+  return (
+    <NavigationContainer>
+      <Tab.Navigator
+        screenOptions={{
+          headerShown: false,
+          tabBarStyle: {
+            backgroundColor: '#020617',
+            borderTopColor: '#111827',
+          },
+          tabBarActiveTintColor: '#22c55e',
+          tabBarInactiveTintColor: '#9ca3af',
+        }}
+      >
+        <Tab.Screen
+          name="Home"
+          component={HomeScreen}
+          options={{ title: 'Zamanlayıcı' }}
+        />
+        <Tab.Screen
+          name="Reports"
+          component={ReportsScreen}
+          options={{ title: 'Raporlar' }}
+        />
+      </Tab.Navigator>
+    </NavigationContainer>
   );
 }
 
@@ -263,5 +312,17 @@ const styles = StyleSheet.create({
   emptyText: {
     color: '#9ca3af',
     fontSize: 13,
+  },
+  reportsContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 60,
+    backgroundColor: '#050816',
+  },
+  reportsSubtitle: {
+    fontSize: 14,
+    color: '#9ca3af',
+    marginTop: 8,
+    textAlign: 'center',
   },
 });
