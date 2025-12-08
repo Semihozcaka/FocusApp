@@ -1,56 +1,89 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  Modal,
+  AppState,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
-const WORK_MINUTES = 25;
+const DEFAULT_MINUTES = 25;
 
 type FocusSession = {
   id: string;
   category: string;
   durationSeconds: number;
   createdAt: string;
+  distractCount: number;
 };
 
 function formatTime(totalSeconds: number) {
-  const minutes = Math.floor(totalSeconds / 60)
+  const m = Math.floor(totalSeconds / 60)
     .toString()
     .padStart(2, '0');
-  const seconds = (totalSeconds % 60).toString().padStart(2, '0');
-  return `${minutes}:${seconds}`;
+  const s = (totalSeconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
 }
 
 function HomeScreen() {
-  const [secondsLeft, setSecondsLeft] = useState(WORK_MINUTES * 60);
+  const [workMinutes, setWorkMinutes] = useState(DEFAULT_MINUTES);
+  const [secondsLeft, setSecondsLeft] = useState(DEFAULT_MINUTES * 60);
   const [isRunning, setIsRunning] = useState(false);
   const [category, setCategory] = useState('Ders');
   const [sessions, setSessions] = useState<FocusSession[]>([]);
+  const [distractions, setDistractions] = useState(0);
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
 
-  // Uygulama açıldığında eski seansları yükle
+  const appStateRef = useRef(AppState.currentState);
+
+  // AppState: dikkat dağınıklığı takibi
   useEffect(() => {
-    loadSessions();
+    const sub = AppState.addEventListener('change', nextState => {
+      const prevState = appStateRef.current;
+
+      // aktiften arka plana geçiş → dikkat dağınıklığı
+      if (prevState === 'active' && nextState === 'background') {
+        if (isRunning) {
+          setDistractions(d => d + 1);
+          setIsRunning(false);
+        }
+      }
+
+      // arka plandan tekrar aktive dönüş
+      if (prevState === 'background' && nextState === 'active') {
+        if (!isRunning && secondsLeft !== workMinutes * 60) {
+          setShowResumePrompt(true);
+        }
+      }
+
+      appStateRef.current = nextState;
+    });
+
+    return () => sub.remove();
+  }, [isRunning, secondsLeft, workMinutes]);
+
+  // Kayıtlı seansları yükle
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const json = await AsyncStorage.getItem('sessions');
+        if (json) {
+          setSessions(JSON.parse(json));
+        }
+      } catch (e) {
+        console.log('loadSessions error', e);
+      }
+    };
+    load();
   }, []);
 
-  const loadSessions = async () => {
-    try {
-      const json = await AsyncStorage.getItem('sessions');
-      if (json) {
-        setSessions(JSON.parse(json));
-      }
-    } catch (e) {
-      console.log('Session load error:', e);
-    }
-  };
-
-  // Zamanlayıcı
+  // Timer efekti
   useEffect(() => {
     if (!isRunning) return;
 
@@ -58,7 +91,6 @@ function HomeScreen() {
       setSecondsLeft(prev => {
         if (prev <= 1) {
           clearInterval(intervalId);
-          // süre bittiğinde seansı kaydet
           saveCurrentSession(prev);
           return 0;
         }
@@ -71,50 +103,89 @@ function HomeScreen() {
 
   const handleStartPause = () => {
     if (secondsLeft === 0) {
-      // bittiyse tekrar başlatmadan önce resetle
-      setSecondsLeft(WORK_MINUTES * 60);
+      setSecondsLeft(workMinutes * 60);
+      setDistractions(0);
     }
     setIsRunning(prev => !prev);
   };
 
-  const handleReset = async () => {
-    // Kullanıcı süreyi sıfırlıyorsa ve sayaç tam dolu değilse seansı kaydedelim
-    if (secondsLeft !== WORK_MINUTES * 60) {
-      await saveCurrentSession(secondsLeft);
+  const handleReset = () => {
+    if (secondsLeft !== workMinutes * 60) {
+      saveCurrentSession(secondsLeft);
     }
+    setSecondsLeft(workMinutes * 60);
     setIsRunning(false);
-    setSecondsLeft(WORK_MINUTES * 60);
+    setDistractions(0);
   };
 
   const saveCurrentSession = async (currentSecondsLeft: number) => {
+    const durationSeconds = workMinutes * 60 - currentSecondsLeft;
+    if (durationSeconds <= 0) return;
+
+    const newSession: FocusSession = {
+      id: Date.now().toString(),
+      category,
+      durationSeconds,
+      createdAt: new Date().toISOString(),
+      distractCount: distractions,
+    };
+
     try {
-      const durationSeconds = WORK_MINUTES * 60 - currentSecondsLeft;
-      if (durationSeconds <= 0) return;
-
-      const newSession: FocusSession = {
-        id: Date.now().toString(),
-        category,
-        durationSeconds,
-        createdAt: new Date().toISOString(),
-      };
-
       const updated = [...sessions, newSession];
       setSessions(updated);
       await AsyncStorage.setItem('sessions', JSON.stringify(updated));
     } catch (e) {
-      console.log('Session save error:', e);
+      console.log('saveSession error', e);
     }
+
+    setDistractions(0);
+  };
+
+  const changeWorkMinutes = (delta: number) => {
+    if (isRunning) return; // çalışırken süre ayarlanmasın
+    setWorkMinutes(prev => {
+      const next = Math.min(90, Math.max(1, prev + delta));
+      setSecondsLeft(next * 60);
+      return next;
+    });
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Odaklanma Zamanlayıcısı</Text>
-      <Text style={styles.subtitle}>25 dakikalık çalışma seansı</Text>
+      {/* Geri dönünce çıkan popup */}
+      <Modal transparent visible={showResumePrompt} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalText}>Devam etmek ister misin?</Text>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity
+                style={styles.modalYes}
+                onPress={() => {
+                  setShowResumePrompt(false);
+                  setIsRunning(true);
+                }}
+              >
+                <Text style={styles.modalYesText}>Evet</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalNo}
+                onPress={() => {
+                  setShowResumePrompt(false);
+                }}
+              >
+                <Text style={styles.modalNoText}>Hayır</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
-      <View style={{ marginBottom: 20 }}>
+      <Text style={styles.title}>Odaklanma Zamanlayıcısı</Text>
+
+      <View style={{ marginBottom: 16 }}>
         <Picker
           selectedValue={category}
-          onValueChange={itemValue => setCategory(itemValue)}
+          onValueChange={v => setCategory(v)}
           style={{ width: 250, height: 50, color: 'white' }}
           dropdownIconColor="white"
         >
@@ -126,11 +197,35 @@ function HomeScreen() {
         </Picker>
       </View>
 
-      <Text style={{ color: '#9ca3af', marginBottom: 10 }}>
+      <Text style={{ color: '#9ca3af', marginBottom: 8 }}>
         Seçilen kategori: {category}
       </Text>
 
-      <Text style={styles.timer}>{formatTime(secondsLeft)}</Text>
+      {/* Büyük sayaç + küçük +/- butonlar */}
+      <View style={styles.timerRow}>
+        <TouchableOpacity
+          style={styles.smallAdjustButton}
+          onPress={() => changeWorkMinutes(-1)}
+        >
+          <Text style={styles.smallAdjustText}>−</Text>
+        </TouchableOpacity>
+
+        <View style={{ alignItems: 'center' }}>
+          <Text style={styles.timer}>{formatTime(secondsLeft)}</Text>
+          <Text style={styles.smallMinutesLabel}>{workMinutes} dk</Text>
+        </View>
+
+        <TouchableOpacity
+          style={styles.smallAdjustButton}
+          onPress={() => changeWorkMinutes(1)}
+        >
+          <Text style={styles.smallAdjustText}>+</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.distractionText}>
+        Dikkat Dağınıklığı: {distractions}
+      </Text>
 
       <View style={styles.buttonsRow}>
         <TouchableOpacity
@@ -138,16 +233,12 @@ function HomeScreen() {
           onPress={handleStartPause}
         >
           <Text style={styles.primaryButtonText}>
-            {isRunning
-              ? 'Durdur'
-              : secondsLeft === 0
-              ? 'Yeniden Başlat'
-              : 'Başlat'}
+            {isRunning ? 'Durdur' : 'Başlat'}
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.secondaryButton} onPress={handleReset}>
-          <Text style={styles.secondaryButtonText}>Sıfırla (ve Kaydet)</Text>
+          <Text style={styles.secondaryButtonText}>Sıfırla (Kaydet)</Text>
         </TouchableOpacity>
       </View>
 
@@ -167,8 +258,11 @@ function HomeScreen() {
               </Text>
               <Text style={styles.sessionText}>
                 Süre:{' '}
-                {Math.floor(session.durationSeconds / 60)} dakika{' '}
-                {session.durationSeconds % 60} saniye
+                {Math.floor(session.durationSeconds / 60)} dk{' '}
+                {session.durationSeconds % 60} sn
+              </Text>
+              <Text style={styles.sessionText}>
+                Dikkat Dağınıklığı: {session.distractCount ?? 0}
               </Text>
               <Text style={styles.sessionText}>
                 Tarih:{' '}
@@ -189,12 +283,9 @@ function ReportsScreen() {
   return (
     <View style={styles.reportsContainer}>
       <Text style={styles.title}>Raporlar</Text>
-      <Text style={styles.reportsSubtitle}>
-        Yakında burada toplam süre, en çok kullanılan kategori vb. istatistikler
-        olacak.
-      </Text>
-      <Text style={{ color: '#9ca3af', marginTop: 8 }}>
-        Şu anki commit: Tab Navigator + ayrı Raporlar ekranı.
+      <Text style={{ color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
+        Toplam süre, kategori bazlı dağılım ve dikkat dağınıklığı istatistikleri
+        burada gösterilecek.
       </Text>
     </View>
   );
@@ -209,7 +300,7 @@ export default function App() {
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
-            backgroundColor: '#020617',
+            backgroundColor: '#050816',
             borderTopColor: '#111827',
           },
           tabBarActiveTintColor: '#22c55e',
@@ -245,19 +336,47 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textAlign: 'center',
   },
-  subtitle: {
-    fontSize: 14,
-    color: '#9ca3af',
-    marginBottom: 20,
-    textAlign: 'center',
+  timerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 18,
+    marginTop: 8,
+    marginBottom: 16,
   },
   timer: {
     fontSize: 64,
     fontWeight: '800',
     color: 'white',
     letterSpacing: 4,
-    marginBottom: 20,
     textAlign: 'center',
+  },
+  smallMinutesLabel: {
+    marginTop: 4,
+    fontSize: 13,
+    color: '#9ca3af',
+    textAlign: 'center',
+  },
+  smallAdjustButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: '#374151',
+    backgroundColor: '#020617',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  smallAdjustText: {
+    color: '#9ca3af',
+    fontSize: 20,
+    fontWeight: '600',
+    marginTop: -2,
+  },
+  distractionText: {
+    textAlign: 'center',
+    color: '#22c55e',
+    marginBottom: 10,
   },
   buttonsRow: {
     flexDirection: 'row',
@@ -292,7 +411,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   sessionsList: {
-    marginTop: 30,
+    marginTop: 24,
   },
   sessionsTitle: {
     color: 'white',
@@ -319,10 +438,43 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     backgroundColor: '#050816',
   },
-  reportsSubtitle: {
-    fontSize: 14,
-    color: '#9ca3af',
-    marginTop: 8,
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: '#00000099',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalBox: {
+    backgroundColor: '#0f172a',
+    padding: 20,
+    borderRadius: 12,
+    width: '80%',
+    alignItems: 'center',
+  },
+  modalText: {
+    color: 'white',
+    fontSize: 18,
+    marginBottom: 20,
     textAlign: 'center',
+  },
+  modalYes: {
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    backgroundColor: '#22c55e',
+    borderRadius: 8,
+  },
+  modalYesText: {
+    color: 'black',
+    fontWeight: '700',
+  },
+  modalNo: {
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#6b7280',
+  },
+  modalNoText: {
+    color: 'white',
   },
 });
