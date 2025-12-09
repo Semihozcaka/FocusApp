@@ -1,17 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-  Modal,
-  AppState,
-} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
-import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { NavigationContainer } from '@react-navigation/native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  AppState, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View
+} from 'react-native';
 
 const DEFAULT_MINUTES = 25;
 
@@ -280,16 +274,80 @@ function HomeScreen() {
 }
 
 function ReportsScreen() {
+  const [sessions, setSessions] = useState<FocusSession[]>([]);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const json = await AsyncStorage.getItem('sessions');
+        if (json) {
+          setSessions(JSON.parse(json));
+        }
+      } catch (e) {
+        console.log('reports load error', e);
+      }
+    };
+    load();
+  }, []);
+
+  const now = new Date();
+  const isToday = (isoDate: string) => {
+    const d = new Date(isoDate);
+    return (
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate()
+    );
+  };
+
+  const todaySessions = sessions.filter(s => isToday(s.createdAt));
+
+  const todaySeconds = todaySessions.reduce(
+    (sum, s) => sum + (s.durationSeconds || 0),
+    0
+  );
+  const totalSeconds = sessions.reduce(
+    (sum, s) => sum + (s.durationSeconds || 0),
+    0
+  );
+  const totalDistractions = sessions.reduce(
+    (sum, s) => sum + (s.distractCount ?? 0),
+    0
+  );
+
+  const todayMinutes = Math.floor(todaySeconds / 60);
+  const totalMinutes = Math.floor(totalSeconds / 60);
+
   return (
     <View style={styles.reportsContainer}>
       <Text style={styles.title}>Raporlar</Text>
-      <Text style={{ color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
-        Toplam süre, kategori bazlı dağılım ve dikkat dağınıklığı istatistikleri
-        burada gösterilecek.
-      </Text>
+
+      <View style={styles.statsContainer}>
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>Bugün Toplam Odaklanma Süresi</Text>
+          <Text style={styles.statValue}>{todayMinutes} dk</Text>
+          <Text style={styles.statSubLabel}>
+            ({todaySeconds} saniye)
+          </Text>
+        </View>
+
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>Tüm Zamanların Toplam Süresi</Text>
+          <Text style={styles.statValue}>{totalMinutes} dk</Text>
+          <Text style={styles.statSubLabel}>
+            ({totalSeconds} saniye)
+          </Text>
+        </View>
+
+        <View style={styles.statCard}>
+          <Text style={styles.statLabel}>Toplam Dikkat Dağınıklığı</Text>
+          <Text style={styles.statValue}>{totalDistractions}</Text>
+        </View>
+      </View>
     </View>
   );
 }
+
 
 const Tab = createBottomTabNavigator();
 
@@ -437,6 +495,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 60,
     backgroundColor: '#050816',
+  },
+  statsContainer: {
+    marginTop: 24,
+    gap: 12,
+  },
+  statCard: {
+    backgroundColor: '#0f172a',
+    borderRadius: 12,
+    padding: 14,
+  },
+  statLabel: {
+    color: '#9ca3af',
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  statValue: {
+    color: 'white',
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  statSubLabel: {
+    color: '#6b7280',
+    fontSize: 11,
+    marginTop: 2,
   },
   modalOverlay: {
     flex: 1,
