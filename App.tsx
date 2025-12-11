@@ -1,13 +1,26 @@
+import React, { useEffect, useState, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Modal,
+  AppState,
+  RefreshControl,
+  Dimensions,
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { NavigationContainer } from '@react-navigation/native';
-import React, { useEffect, useRef, useState } from 'react';
 import {
-  AppState, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View
-} from 'react-native';
+  NavigationContainer,
+  useIsFocused,
+} from '@react-navigation/native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { BarChart, PieChart } from 'react-native-chart-kit';
 
 const DEFAULT_MINUTES = 25;
+const screenWidth = Dimensions.get('window').width;
 
 type FocusSession = {
   id: string;
@@ -25,6 +38,8 @@ function formatTime(totalSeconds: number) {
   return `${m}:${s}`;
 }
 
+/* -------------------------------- Home -------------------------------- */
+
 function HomeScreen() {
   const [workMinutes, setWorkMinutes] = useState(DEFAULT_MINUTES);
   const [secondsLeft, setSecondsLeft] = useState(DEFAULT_MINUTES * 60);
@@ -36,12 +51,11 @@ function HomeScreen() {
 
   const appStateRef = useRef(AppState.currentState);
 
-  // AppState: dikkat dağınıklığı takibi
+  // AppState ile dikkat dağınıklığı takibi
   useEffect(() => {
     const sub = AppState.addEventListener('change', nextState => {
       const prevState = appStateRef.current;
 
-      // aktiften arka plana geçiş → dikkat dağınıklığı
       if (prevState === 'active' && nextState === 'background') {
         if (isRunning) {
           setDistractions(d => d + 1);
@@ -49,7 +63,6 @@ function HomeScreen() {
         }
       }
 
-      // arka plandan tekrar aktive dönüş
       if (prevState === 'background' && nextState === 'active') {
         if (!isRunning && secondsLeft !== workMinutes * 60) {
           setShowResumePrompt(true);
@@ -77,7 +90,7 @@ function HomeScreen() {
     load();
   }, []);
 
-  // Timer efekti
+  // Sayaç efekti
   useEffect(() => {
     if (!isRunning) return;
 
@@ -174,13 +187,13 @@ function HomeScreen() {
         </View>
       </Modal>
 
-      <Text style={styles.title}>Odaklanma Zamanlayıcısı</Text>
+      <Text style={styles.title}>FocusApp</Text>
 
       <View style={{ marginBottom: 16 }}>
         <Picker
           selectedValue={category}
           onValueChange={v => setCategory(v)}
-          style={{ width: 250, height: 50, color: 'white' }}
+          style={{ width: 120, height: 50, color: 'white' }}
           dropdownIconColor="white"
         >
           <Picker.Item label="Ders" value="Ders" />
@@ -195,7 +208,7 @@ function HomeScreen() {
         Seçilen kategori: {category}
       </Text>
 
-      {/* Büyük sayaç + küçük +/- butonlar */}
+      {/* Büyük sayaç  +/- butonlar */}
       <View style={styles.timerRow}>
         <TouchableOpacity
           style={styles.smallAdjustButton}
@@ -273,70 +286,163 @@ function HomeScreen() {
   );
 }
 
+/* ------------------------------- Reports ------------------------------- */
+
 function ReportsScreen() {
   const [sessions, setSessions] = useState<FocusSession[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const isFocused = useIsFocused();
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const json = await AsyncStorage.getItem('sessions');
-        if (json) {
-          setSessions(JSON.parse(json));
-        }
-      } catch (e) {
-        console.log('reports load error', e);
+  const loadSessions = async () => {
+    try {
+      const json = await AsyncStorage.getItem('sessions');
+      if (json) {
+        setSessions(JSON.parse(json));
+      } else {
+        setSessions([]);
       }
-    };
-    load();
-  }, []);
-
-  const now = new Date();
-  const isToday = (isoDate: string) => {
-    const d = new Date(isoDate);
-    return (
-      d.getFullYear() === now.getFullYear() &&
-      d.getMonth() === now.getMonth() &&
-      d.getDate() === now.getDate()
-    );
+    } catch (e) {
+      console.log('reports load error', e);
+    }
   };
 
+  // Tab ekrana her geldiğinde veriyi yenile
+  useEffect(() => {
+    if (isFocused) {
+      loadSessions();
+    }
+  }, [isFocused]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadSessions();
+    setRefreshing(false);
+  };
+
+  const now = new Date();
+
+  const isSameDay = (d1: Date, d2: Date) =>
+    d1.getFullYear() === d2.getFullYear() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getDate() === d2.getDate();
+
+  const isToday = (iso: string) => isSameDay(new Date(iso), now);
+
+  // Genel istatistikler
   const todaySessions = sessions.filter(s => isToday(s.createdAt));
 
   const todaySeconds = todaySessions.reduce(
     (sum, s) => sum + (s.durationSeconds || 0),
-    0
+    0,
   );
   const totalSeconds = sessions.reduce(
     (sum, s) => sum + (s.durationSeconds || 0),
-    0
+    0,
   );
   const totalDistractions = sessions.reduce(
     (sum, s) => sum + (s.distractCount ?? 0),
-    0
+    0,
   );
 
   const todayMinutes = Math.floor(todaySeconds / 60);
   const totalMinutes = Math.floor(totalSeconds / 60);
 
+  // Son 7 gün bar chart verisi
+  const weekdayShort = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
+
+  const last7Days = Array.from({ length: 7 }).map((_, index) => {
+    const d = new Date();
+    d.setDate(now.getDate() - (6 - index)); // solda en eski
+
+    const label = weekdayShort[d.getDay()];
+    const dayTotalSeconds = sessions.reduce((sum, s) => {
+      const sd = new Date(s.createdAt);
+      return isSameDay(sd, d) ? sum + (s.durationSeconds || 0) : sum;
+    }, 0);
+
+    return {
+      label,
+      minutes: dayTotalSeconds / 60, // dakika ama kesirli olabilir
+    };
+  });
+
+  const barData = {
+    labels: last7Days.map(d => d.label),
+    datasets: [
+      {
+        data: last7Days.map(d => d.minutes),
+      },
+    ],
+  };
+
+  // Kategori dağılımı (pie chart) – nüfus = saniye
+  const categoryTotals: Record<string, number> = {};
+  sessions.forEach(s => {
+    const key = s.category || 'Diğer';
+    categoryTotals[key] = (categoryTotals[key] || 0) + (s.durationSeconds || 0);
+  });
+
+  const colors = [
+    '#22c55e',
+    '#3b82f6',
+    '#a855f7',
+    '#f97316',
+    '#e11d48',
+    '#14b8a6',
+  ];
+
+  const pieEntries = Object.entries(categoryTotals).filter(
+    ([, seconds]) => seconds > 0,
+  );
+
+  const pieData = pieEntries.map(([cat, seconds], idx) => ({
+    name: cat,                // sadece kategori adı
+    population: seconds,      // tamamen saniye → oranlar doğru
+    color: colors[idx % colors.length],
+    legendFontColor: '#e5e7eb',
+    legendFontSize: 13,
+  }));
+
+  const chartConfig = {
+    backgroundGradientFrom: '#020617',
+    backgroundGradientTo: '#020617',
+    decimalPlaces: 0,
+    color: (opacity = 1) => `rgba(34, 197, 94, ${opacity})`,
+    labelColor: (opacity = 1) => `rgba(209, 213, 219, ${opacity})`,
+    propsForBackgroundLines: {
+      stroke: '#1f2937',
+    },
+    barPercentage: 0.5,
+  };
+
   return (
-    <View style={styles.reportsContainer}>
+    <ScrollView
+      style={styles.reportsContainer}
+      contentContainerStyle={{ paddingBottom: 40 }}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor="#22c55e"
+          colors={['#22c55e']}
+          progressBackgroundColor="#020617"
+        />
+      }
+    >
       <Text style={styles.title}>Raporlar</Text>
 
+      {/* Genel istatistikler */}
       <View style={styles.statsContainer}>
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>Bugün Toplam Odaklanma Süresi</Text>
           <Text style={styles.statValue}>{todayMinutes} dk</Text>
-          <Text style={styles.statSubLabel}>
-            ({todaySeconds} saniye)
-          </Text>
+          <Text style={styles.statSubLabel}>({todaySeconds} sn)</Text>
         </View>
 
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>Tüm Zamanların Toplam Süresi</Text>
           <Text style={styles.statValue}>{totalMinutes} dk</Text>
-          <Text style={styles.statSubLabel}>
-            ({totalSeconds} saniye)
-          </Text>
+          <Text style={styles.statSubLabel}>({totalSeconds} sn)</Text>
         </View>
 
         <View style={styles.statCard}>
@@ -344,10 +450,48 @@ function ReportsScreen() {
           <Text style={styles.statValue}>{totalDistractions}</Text>
         </View>
       </View>
-    </View>
+
+      {/* Son 7 gün bar chart */}
+      <Text style={styles.chartTitle}>Son 7 Günlük Odaklanma Süresi</Text>
+      {totalSeconds === 0 ? (
+        <Text style={styles.emptyText}>
+          Grafik için henüz kayıtlı seans yok.
+        </Text>
+      ) : (
+        <BarChart
+          data={barData}
+          width={screenWidth - 48}
+          height={220}
+          chartConfig={chartConfig}
+          style={styles.chart}
+          fromZero
+          showValuesOnTopOfBars
+        />
+      )}
+
+      {/* Kategori bazlı pie chart */}
+      <Text style={styles.chartTitle}>Kategori Bazlı Dağılım</Text>
+      {pieData.length === 0 ? (
+        <Text style={styles.emptyText}>
+          Kategori grafiği için henüz veri yok.
+        </Text>
+      ) : (
+        <PieChart
+          data={pieData}
+          width={screenWidth - 48}
+          height={220}
+          accessor="population"
+          backgroundColor="transparent"
+          paddingLeft="16"
+          chartConfig={chartConfig}
+          hasLegend
+        />
+      )}
+    </ScrollView>
   );
 }
 
+/* ------------------------------- Navigator ------------------------------ */
 
 const Tab = createBottomTabNavigator();
 
@@ -379,6 +523,8 @@ export default function App() {
     </NavigationContainer>
   );
 }
+
+/* -------------------------------- Styles -------------------------------- */
 
 const styles = StyleSheet.create({
   container: {
@@ -519,6 +665,15 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 11,
     marginTop: 2,
+  },
+  chartTitle: {
+    color: 'white',
+    fontSize: 18,
+    marginTop: 24,
+    marginBottom: 8,
+  },
+  chart: {
+    borderRadius: 12,
   },
   modalOverlay: {
     flex: 1,
