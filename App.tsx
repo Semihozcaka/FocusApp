@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useContext } from 'react';
 import {
   View,
   Text,
@@ -9,18 +9,69 @@ import {
   AppState,
   RefreshControl,
   Dimensions,
+  PanResponder,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import {
   NavigationContainer,
   useIsFocused,
+  useNavigation,
 } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { BarChart, PieChart } from 'react-native-chart-kit';
 
 const DEFAULT_MINUTES = 25;
 const screenWidth = Dimensions.get('window').width;
+
+/* ------------------------------- Theme ------------------------------- */
+
+type Theme = {
+  background: string;
+  card: string;
+  text: string;
+  muted: string;
+  accent: string;
+  tabBar: string;
+  border: string;
+  buttonSecondaryBg: string;
+  buttonSecondaryBorder: string;
+};
+
+const DarkTheme: Theme = {
+  background: '#050816',
+  card: '#0f172a',
+  text: '#f9fafb',
+  muted: '#9ca3af',
+  accent: '#22c55e',
+  tabBar: '#050816',
+  border: '#111827',
+  buttonSecondaryBg: 'transparent',
+  buttonSecondaryBorder: '#6b7280',
+};
+
+const LightTheme: Theme = {
+  background: '#f9fafb',
+  card: '#e5e7eb',
+  text: '#020617',
+  muted: '#4b5563',
+  accent: '#f97316',
+  tabBar: '#f3f4f6',
+  border: '#e5e7eb',
+  buttonSecondaryBg: 'transparent',
+  buttonSecondaryBorder: '#9ca3af',
+};
+
+const ThemeContext = React.createContext<{
+  theme: Theme;
+  isDark: boolean;
+  toggleTheme: () => void;
+}>({
+  theme: DarkTheme,
+  isDark: true,
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  toggleTheme: () => {},
+});
 
 type FocusSession = {
   id: string;
@@ -38,9 +89,38 @@ function formatTime(totalSeconds: number) {
   return `${m}:${s}`;
 }
 
+/* ------------------------- Küçük tema switcher ------------------------ */
+
+function ThemeToggle() {
+  const { isDark, toggleTheme } = useContext(ThemeContext);
+
+  return (
+    <TouchableOpacity
+      onPress={toggleTheme}
+      style={[
+        styles.themeToggle,
+        { backgroundColor: isDark ? '#020617' : '#f97316' },
+      ]}
+      activeOpacity={0.85}
+    >
+      <View
+        style={[
+          styles.themeToggleThumb,
+          { alignSelf: isDark ? 'flex-end' : 'flex-start' },
+        ]}
+      >
+        <Text style={styles.themeToggleIcon}>{isDark ? '🌙' : '☀️'}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 /* -------------------------------- Home -------------------------------- */
 
 function HomeScreen() {
+  const { theme } = useContext(ThemeContext);
+  const navigation = useNavigation<any>();
+
   const [workMinutes, setWorkMinutes] = useState(DEFAULT_MINUTES);
   const [secondsLeft, setSecondsLeft] = useState(DEFAULT_MINUTES * 60);
   const [isRunning, setIsRunning] = useState(false);
@@ -51,7 +131,18 @@ function HomeScreen() {
 
   const appStateRef = useRef(AppState.currentState);
 
-  // AppState ile dikkat dağınıklığı takibi
+  // Swipe: sola kaydır → Reports
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > 20 && Math.abs(g.dy) < 20,
+      onPanResponderRelease: (_, g) => {
+        if (g.dx < -50) navigation.navigate('Reports');
+      },
+    }),
+  ).current;
+
+  // AppState: dikkat dağınıklığı
   useEffect(() => {
     const sub = AppState.addEventListener('change', nextState => {
       const prevState = appStateRef.current;
@@ -75,14 +166,12 @@ function HomeScreen() {
     return () => sub.remove();
   }, [isRunning, secondsLeft, workMinutes]);
 
-  // Kayıtlı seansları yükle
+  // Seans yükle
   useEffect(() => {
     const load = async () => {
       try {
         const json = await AsyncStorage.getItem('sessions');
-        if (json) {
-          setSessions(JSON.parse(json));
-        }
+        if (json) setSessions(JSON.parse(json));
       } catch (e) {
         console.log('loadSessions error', e);
       }
@@ -90,7 +179,7 @@ function HomeScreen() {
     load();
   }, []);
 
-  // Sayaç efekti
+  // Timer
   useEffect(() => {
     if (!isRunning) return;
 
@@ -149,7 +238,7 @@ function HomeScreen() {
   };
 
   const changeWorkMinutes = (delta: number) => {
-    if (isRunning) return; // çalışırken süre ayarlanmasın
+    if (isRunning) return;
     setWorkMinutes(prev => {
       const next = Math.min(90, Math.max(1, prev + delta));
       setSecondsLeft(next * 60);
@@ -158,15 +247,20 @@ function HomeScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      {/* Geri dönünce çıkan popup */}
+    <View
+      style={[styles.container, { backgroundColor: theme.background }]}
+      {...panResponder.panHandlers}
+    >
+      {/* Resume Modal */}
       <Modal transparent visible={showResumePrompt} animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalText}>Devam etmek ister misin?</Text>
+          <View style={[styles.modalBox, { backgroundColor: theme.card }]}>
+            <Text style={[styles.modalText, { color: theme.text }]}>
+              Devam etmek ister misin?
+            </Text>
             <View style={{ flexDirection: 'row', gap: 12 }}>
               <TouchableOpacity
-                style={styles.modalYes}
+                style={[styles.modalYes, { backgroundColor: theme.accent }]}
                 onPress={() => {
                   setShowResumePrompt(false);
                   setIsRunning(true);
@@ -175,26 +269,35 @@ function HomeScreen() {
                 <Text style={styles.modalYesText}>Evet</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.modalNo}
-                onPress={() => {
-                  setShowResumePrompt(false);
-                }}
+                style={[
+                  styles.modalNo,
+                  { borderColor: theme.buttonSecondaryBorder },
+                ]}
+                onPress={() => setShowResumePrompt(false)}
               >
-                <Text style={styles.modalNoText}>Hayır</Text>
+                <Text style={[styles.modalNoText, { color: theme.text }]}>
+                  Hayır
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      <Text style={styles.title}>FocusApp</Text>
+      {/* Header + toggle */}
+      <View style={styles.headerRow}>
+        <Text style={[styles.title, { color: theme.text }]}>
+          FocusApp
+        </Text>
+        <ThemeToggle />
+      </View>
 
       <View style={{ marginBottom: 16 }}>
         <Picker
           selectedValue={category}
           onValueChange={v => setCategory(v)}
-          style={{ width: 120, height: 50, color: 'white' }}
-          dropdownIconColor="white"
+          style={{ width: 120, height: 50, color: theme.text }}
+          dropdownIconColor={theme.text}
         >
           <Picker.Item label="Ders" value="Ders" />
           <Picker.Item label="İş" value="İş" />
@@ -204,39 +307,48 @@ function HomeScreen() {
         </Picker>
       </View>
 
-      <Text style={{ color: '#9ca3af', marginBottom: 8 }}>
+      <Text style={{ color: theme.muted, marginBottom: 8 }}>
         Seçilen kategori: {category}
       </Text>
 
-      {/* Büyük sayaç  +/- butonlar */}
       <View style={styles.timerRow}>
         <TouchableOpacity
-          style={styles.smallAdjustButton}
+          style={[
+            styles.smallAdjustButton,
+            { backgroundColor: theme.card, borderColor: theme.border },
+          ]}
           onPress={() => changeWorkMinutes(-1)}
         >
-          <Text style={styles.smallAdjustText}>−</Text>
+          <Text style={[styles.smallAdjustText, { color: theme.text }]}>−</Text>
         </TouchableOpacity>
 
         <View style={{ alignItems: 'center' }}>
-          <Text style={styles.timer}>{formatTime(secondsLeft)}</Text>
-          <Text style={styles.smallMinutesLabel}>{workMinutes} dk</Text>
+          <Text style={[styles.timer, { color: theme.text }]}>
+            {formatTime(secondsLeft)}
+          </Text>
+          <Text style={[styles.smallMinutesLabel, { color: theme.muted }]}>
+            {workMinutes} dk
+          </Text>
         </View>
 
         <TouchableOpacity
-          style={styles.smallAdjustButton}
+          style={[
+            styles.smallAdjustButton,
+            { backgroundColor: theme.card, borderColor: theme.border },
+          ]}
           onPress={() => changeWorkMinutes(1)}
         >
-          <Text style={styles.smallAdjustText}>+</Text>
+          <Text style={[styles.smallAdjustText, { color: theme.text }]}>+</Text>
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.distractionText}>
+      <Text style={[styles.distractionText, { color: theme.accent }]}>
         Dikkat Dağınıklığı: {distractions}
       </Text>
 
       <View style={styles.buttonsRow}>
         <TouchableOpacity
-          style={styles.primaryButton}
+          style={[styles.primaryButton, { backgroundColor: theme.accent }]}
           onPress={handleStartPause}
         >
           <Text style={styles.primaryButtonText}>
@@ -244,8 +356,19 @@ function HomeScreen() {
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={handleReset}>
-          <Text style={styles.secondaryButtonText}>Sıfırla (Kaydet)</Text>
+        <TouchableOpacity
+          style={[
+            styles.secondaryButton,
+            {
+              borderColor: theme.buttonSecondaryBorder,
+              backgroundColor: theme.buttonSecondaryBg,
+            },
+          ]}
+          onPress={handleReset}
+        >
+          <Text style={[styles.secondaryButtonText, { color: theme.text }]}>
+            Sıfırla (Kaydet)
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -253,25 +376,31 @@ function HomeScreen() {
         style={styles.sessionsList}
         contentContainerStyle={{ paddingBottom: 40 }}
       >
-        <Text style={styles.sessionsTitle}>Seans Geçmişi</Text>
+        <Text style={[styles.sessionsTitle, { color: theme.text }]}>
+          Seans Geçmişi
+        </Text>
 
         {sessions.length === 0 ? (
-          <Text style={styles.emptyText}>Henüz kayıtlı seans yok.</Text>
+          <Text style={[styles.emptyText, { color: theme.muted }]}>
+            Henüz kayıtlı seans yok.
+          </Text>
         ) : (
           sessions.map(session => (
-            <View key={session.id} style={styles.sessionCard}>
-              <Text style={styles.sessionText}>
+            <View
+              key={session.id}
+              style={[styles.sessionCard, { backgroundColor: theme.card }]}
+            >
+              <Text style={[styles.sessionText, { color: theme.text }]}>
                 Kategori: {session.category}
               </Text>
-              <Text style={styles.sessionText}>
-                Süre:{' '}
-                {Math.floor(session.durationSeconds / 60)} dk{' '}
+              <Text style={[styles.sessionText, { color: theme.text }]}>
+                Süre: {Math.floor(session.durationSeconds / 60)} dk{' '}
                 {session.durationSeconds % 60} sn
               </Text>
-              <Text style={styles.sessionText}>
+              <Text style={[styles.sessionText, { color: theme.text }]}>
                 Dikkat Dağınıklığı: {session.distractCount ?? 0}
               </Text>
-              <Text style={styles.sessionText}>
+              <Text style={[styles.sessionText, { color: theme.muted }]}>
                 Tarih:{' '}
                 {new Date(session.createdAt).toLocaleString('tr-TR', {
                   dateStyle: 'short',
@@ -289,28 +418,35 @@ function HomeScreen() {
 /* ------------------------------- Reports ------------------------------- */
 
 function ReportsScreen() {
+  const { theme, isDark } = useContext(ThemeContext);
+  const navigation = useNavigation<any>();
   const [sessions, setSessions] = useState<FocusSession[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const isFocused = useIsFocused();
 
+  // Swipe: sağa kaydır → Home
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > 20 && Math.abs(g.dy) < 20,
+      onPanResponderRelease: (_, g) => {
+        if (g.dx > 50) navigation.navigate('Home');
+      },
+    }),
+  ).current;
+
   const loadSessions = async () => {
     try {
       const json = await AsyncStorage.getItem('sessions');
-      if (json) {
-        setSessions(JSON.parse(json));
-      } else {
-        setSessions([]);
-      }
+      if (json) setSessions(JSON.parse(json));
+      else setSessions([]);
     } catch (e) {
       console.log('reports load error', e);
     }
   };
 
-  // Tab ekrana her geldiğinde veriyi yenile
   useEffect(() => {
-    if (isFocused) {
-      loadSessions();
-    }
+    if (isFocused) loadSessions();
   }, [isFocused]);
 
   const onRefresh = async () => {
@@ -328,7 +464,6 @@ function ReportsScreen() {
 
   const isToday = (iso: string) => isSameDay(new Date(iso), now);
 
-  // Genel istatistikler
   const todaySessions = sessions.filter(s => isToday(s.createdAt));
 
   const todaySeconds = todaySessions.reduce(
@@ -347,114 +482,126 @@ function ReportsScreen() {
   const todayMinutes = Math.floor(todaySeconds / 60);
   const totalMinutes = Math.floor(totalSeconds / 60);
 
-  // Son 7 gün bar chart verisi
   const weekdayShort = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
 
   const last7Days = Array.from({ length: 7 }).map((_, index) => {
     const d = new Date();
-    d.setDate(now.getDate() - (6 - index)); // solda en eski
-
+    d.setDate(now.getDate() - (6 - index));
     const label = weekdayShort[d.getDay()];
+
     const dayTotalSeconds = sessions.reduce((sum, s) => {
       const sd = new Date(s.createdAt);
       return isSameDay(sd, d) ? sum + (s.durationSeconds || 0) : sum;
     }, 0);
 
-    return {
-      label,
-      minutes: dayTotalSeconds / 60, // dakika ama kesirli olabilir
-    };
+    return { label, minutes: Math.round(dayTotalSeconds / 60) };
   });
 
   const barData = {
     labels: last7Days.map(d => d.label),
-    datasets: [
-      {
-        data: last7Days.map(d => d.minutes),
-      },
-    ],
+    datasets: [{ data: last7Days.map(d => d.minutes) }],
   };
 
-  // Kategori dağılımı (pie chart) – nüfus = saniye
   const categoryTotals: Record<string, number> = {};
   sessions.forEach(s => {
     const key = s.category || 'Diğer';
     categoryTotals[key] = (categoryTotals[key] || 0) + (s.durationSeconds || 0);
   });
 
-  const colors = [
-    '#22c55e',
-    '#3b82f6',
-    '#a855f7',
-    '#f97316',
-    '#e11d48',
-    '#14b8a6',
-  ];
+  const colors = ['#22c55e', '#3b82f6', '#a855f7', '#f97316', '#e11d48', '#14b8a6'];
 
-  const pieEntries = Object.entries(categoryTotals).filter(
-    ([, seconds]) => seconds > 0,
-  );
+  const pieEntries = Object.entries(categoryTotals).filter(([, seconds]) => seconds > 0);
 
   const pieData = pieEntries.map(([cat, seconds], idx) => ({
-    name: cat,                // sadece kategori adı
-    population: seconds,      // tamamen saniye → oranlar doğru
+    name: cat,
+    population: seconds,
     color: colors[idx % colors.length],
-    legendFontColor: '#e5e7eb',
+    legendFontColor: isDark ? '#e5e7eb' : '#111827',
     legendFontSize: 13,
   }));
 
+  // chart-kit için light modda arka planı açıyoruz
   const chartConfig = {
-    backgroundGradientFrom: '#020617',
-    backgroundGradientTo: '#020617',
+    backgroundGradientFrom: theme.card,
+    backgroundGradientTo: theme.card,
     decimalPlaces: 0,
-    color: (opacity = 1) => `rgba(34, 197, 94, ${opacity})`,
-    labelColor: (opacity = 1) => `rgba(209, 213, 219, ${opacity})`,
-    propsForBackgroundLines: {
-      stroke: '#1f2937',
+    color: (opacity = 1) => {
+      // bar rengi (accent)
+      const a = theme.accent;
+      // accent hex -> rgba basit yaklaşım: dark/light’ta zaten net; opaklık sadece label için kullanılıyor
+      return `rgba(34, 197, 94, ${opacity})`;
     },
-    barPercentage: 0.5,
+    labelColor: (opacity = 1) =>
+      isDark
+        ? `rgba(209, 213, 219, ${opacity})`
+        : `rgba(17, 24, 39, ${opacity})`,
+    propsForBackgroundLines: {
+      stroke: isDark ? '#1f2937' : '#cbd5e1',
+    },
+    barPercentage: 0.55,
   };
 
   return (
     <ScrollView
-      style={styles.reportsContainer}
+      style={[styles.reportsContainer, { backgroundColor: theme.background }]}
       contentContainerStyle={{ paddingBottom: 40 }}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
           onRefresh={onRefresh}
-          tintColor="#22c55e"
-          colors={['#22c55e']}
-          progressBackgroundColor="#020617"
+          tintColor={theme.accent}
+          colors={[theme.accent]}
+          progressBackgroundColor={theme.background}
         />
       }
+      {...panResponder.panHandlers}
     >
-      <Text style={styles.title}>Raporlar</Text>
+      <View style={styles.headerRow}>
+        <Text style={[styles.title, { color: theme.text }]}>Raporlar</Text>
+        <ThemeToggle />
+      </View>
 
-      {/* Genel istatistikler */}
       <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Bugün Toplam Odaklanma Süresi</Text>
-          <Text style={styles.statValue}>{todayMinutes} dk</Text>
-          <Text style={styles.statSubLabel}>({todaySeconds} sn)</Text>
+        <View style={[styles.statCard, { backgroundColor: theme.card }]}>
+          <Text style={[styles.statLabel, { color: theme.muted }]}>
+            Bugün Toplam Odaklanma Süresi
+          </Text>
+          <Text style={[styles.statValue, { color: theme.text }]}>
+            {todayMinutes} dk
+          </Text>
+          <Text style={[styles.statSubLabel, { color: theme.muted }]}>
+            ({todaySeconds} sn)
+          </Text>
         </View>
 
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Tüm Zamanların Toplam Süresi</Text>
-          <Text style={styles.statValue}>{totalMinutes} dk</Text>
-          <Text style={styles.statSubLabel}>({totalSeconds} sn)</Text>
+        <View style={[styles.statCard, { backgroundColor: theme.card }]}>
+          <Text style={[styles.statLabel, { color: theme.muted }]}>
+            Tüm Zamanların Toplam Süresi
+          </Text>
+          <Text style={[styles.statValue, { color: theme.text }]}>
+            {totalMinutes} dk
+          </Text>
+          <Text style={[styles.statSubLabel, { color: theme.muted }]}>
+            ({totalSeconds} sn)
+          </Text>
         </View>
 
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Toplam Dikkat Dağınıklığı</Text>
-          <Text style={styles.statValue}>{totalDistractions}</Text>
+        <View style={[styles.statCard, { backgroundColor: theme.card }]}>
+          <Text style={[styles.statLabel, { color: theme.muted }]}>
+            Toplam Dikkat Dağınıklığı
+          </Text>
+          <Text style={[styles.statValue, { color: theme.text }]}>
+            {totalDistractions}
+          </Text>
         </View>
       </View>
 
-      {/* Son 7 gün bar chart */}
-      <Text style={styles.chartTitle}>Son 7 Günlük Odaklanma Süresi</Text>
+      <Text style={[styles.chartTitle, { color: theme.text }]}>
+        Son 7 Günlük Odaklanma Süresi
+      </Text>
+
       {totalSeconds === 0 ? (
-        <Text style={styles.emptyText}>
+        <Text style={[styles.emptyText, { color: theme.muted }]}>
           Grafik için henüz kayıtlı seans yok.
         </Text>
       ) : (
@@ -463,16 +610,18 @@ function ReportsScreen() {
           width={screenWidth - 48}
           height={220}
           chartConfig={chartConfig}
-          style={styles.chart}
+          style={[styles.chart, { backgroundColor: theme.card }]}
           fromZero
           showValuesOnTopOfBars
         />
       )}
 
-      {/* Kategori bazlı pie chart */}
-      <Text style={styles.chartTitle}>Kategori Bazlı Dağılım</Text>
+      <Text style={[styles.chartTitle, { color: theme.text }]}>
+        Kategori Bazlı Dağılım
+      </Text>
+
       {pieData.length === 0 ? (
-        <Text style={styles.emptyText}>
+        <Text style={[styles.emptyText, { color: theme.muted }]}>
           Kategori grafiği için henüz veri yok.
         </Text>
       ) : (
@@ -496,31 +645,37 @@ function ReportsScreen() {
 const Tab = createBottomTabNavigator();
 
 export default function App() {
+  const [isDark, setIsDark] = useState(true);
+  const theme = isDark ? DarkTheme : LightTheme;
+  const toggleTheme = () => setIsDark(prev => !prev);
+
   return (
-    <NavigationContainer>
-      <Tab.Navigator
-        screenOptions={{
-          headerShown: false,
-          tabBarStyle: {
-            backgroundColor: '#050816',
-            borderTopColor: '#111827',
-          },
-          tabBarActiveTintColor: '#22c55e',
-          tabBarInactiveTintColor: '#9ca3af',
-        }}
-      >
-        <Tab.Screen
-          name="Home"
-          component={HomeScreen}
-          options={{ title: 'Zamanlayıcı' }}
-        />
-        <Tab.Screen
-          name="Reports"
-          component={ReportsScreen}
-          options={{ title: 'Raporlar' }}
-        />
-      </Tab.Navigator>
-    </NavigationContainer>
+    <ThemeContext.Provider value={{ theme, isDark, toggleTheme }}>
+      <NavigationContainer>
+        <Tab.Navigator
+          screenOptions={{
+            headerShown: false,
+            tabBarStyle: {
+              backgroundColor: theme.tabBar,
+              borderTopColor: theme.border,
+            },
+            tabBarActiveTintColor: theme.accent,
+            tabBarInactiveTintColor: theme.muted,
+          }}
+        >
+          <Tab.Screen
+            name="Home"
+            component={HomeScreen}
+            options={{ title: 'Zamanlayıcı' }}
+          />
+          <Tab.Screen
+            name="Reports"
+            component={ReportsScreen}
+            options={{ title: 'Raporlar' }}
+          />
+        </Tab.Navigator>
+      </NavigationContainer>
+    </ThemeContext.Provider>
   );
 }
 
@@ -531,14 +686,18 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 24,
     paddingTop: 60,
-    backgroundColor: '#050816',
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    gap: 12,
   },
   title: {
     fontSize: 24,
-    fontWeight: '700',
-    color: 'white',
-    marginBottom: 4,
-    textAlign: 'center',
+    fontWeight: '800',
+    flexShrink: 1,
   },
   timerRow: {
     flexDirection: 'row',
@@ -550,37 +709,32 @@ const styles = StyleSheet.create({
   },
   timer: {
     fontSize: 64,
-    fontWeight: '800',
-    color: 'white',
+    fontWeight: '900',
     letterSpacing: 4,
     textAlign: 'center',
   },
   smallMinutesLabel: {
     marginTop: 4,
     fontSize: 13,
-    color: '#9ca3af',
     textAlign: 'center',
   },
   smallAdjustButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     borderWidth: 1,
-    borderColor: '#374151',
-    backgroundColor: '#020617',
     alignItems: 'center',
     justifyContent: 'center',
   },
   smallAdjustText: {
-    color: '#9ca3af',
     fontSize: 20,
-    fontWeight: '600',
+    fontWeight: '700',
     marginTop: -2,
   },
   distractionText: {
     textAlign: 'center',
-    color: '#22c55e',
     marginBottom: 10,
+    fontWeight: '600',
   },
   buttonsRow: {
     flexDirection: 'row',
@@ -588,7 +742,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryButton: {
-    backgroundColor: '#22c55e',
     paddingHorizontal: 24,
     paddingVertical: 14,
     borderRadius: 999,
@@ -597,11 +750,10 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: 'black',
-    fontWeight: '700',
+    fontWeight: '800',
     fontSize: 16,
   },
   secondaryButton: {
-    borderColor: '#6b7280',
     borderWidth: 1,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -610,70 +762,65 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   secondaryButtonText: {
-    color: 'white',
-    fontWeight: '600',
+    fontWeight: '700',
     fontSize: 12,
   },
   sessionsList: {
     marginTop: 24,
   },
   sessionsTitle: {
-    color: 'white',
     fontSize: 18,
     marginBottom: 10,
+    fontWeight: '800',
   },
   sessionCard: {
-    backgroundColor: '#1f2937',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 10,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
   },
   sessionText: {
-    color: 'white',
     fontSize: 13,
+    fontWeight: '600',
   },
   emptyText: {
-    color: '#9ca3af',
     fontSize: 13,
+    fontWeight: '600',
   },
   reportsContainer: {
     flex: 1,
     paddingHorizontal: 24,
     paddingTop: 60,
-    backgroundColor: '#050816',
   },
   statsContainer: {
     marginTop: 24,
     gap: 12,
   },
   statCard: {
-    backgroundColor: '#0f172a',
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 14,
   },
   statLabel: {
-    color: '#9ca3af',
     fontSize: 13,
     marginBottom: 4,
-  },
-  statValue: {
-    color: 'white',
-    fontSize: 24,
     fontWeight: '700',
   },
+  statValue: {
+    fontSize: 26,
+    fontWeight: '900',
+  },
   statSubLabel: {
-    color: '#6b7280',
     fontSize: 11,
     marginTop: 2,
+    fontWeight: '600',
   },
   chartTitle: {
-    color: 'white',
     fontSize: 18,
     marginTop: 24,
     marginBottom: 8,
+    fontWeight: '900',
   },
   chart: {
-    borderRadius: 12,
+    borderRadius: 14,
   },
   modalOverlay: {
     flex: 1,
@@ -682,36 +829,51 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalBox: {
-    backgroundColor: '#0f172a',
     padding: 20,
     borderRadius: 12,
     width: '80%',
     alignItems: 'center',
   },
   modalText: {
-    color: 'white',
     fontSize: 18,
     marginBottom: 20,
     textAlign: 'center',
+    fontWeight: '800',
   },
   modalYes: {
     paddingVertical: 10,
     paddingHorizontal: 24,
-    backgroundColor: '#22c55e',
     borderRadius: 8,
   },
   modalYesText: {
     color: 'black',
-    fontWeight: '700',
+    fontWeight: '900',
   },
   modalNo: {
     paddingVertical: 10,
     paddingHorizontal: 24,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#6b7280',
   },
   modalNoText: {
-    color: 'white',
+    fontWeight: '800',
+  },
+  themeToggle: {
+    width: 46,
+    height: 24,
+    borderRadius: 999,
+    paddingHorizontal: 3,
+    justifyContent: 'center',
+  },
+  themeToggleThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 999,
+    backgroundColor: 'white',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  themeToggleIcon: {
+    fontSize: 12,
   },
 });
