@@ -308,7 +308,7 @@ function HomeScreen() {
       </View>
 
       <Text style={{ color: theme.muted, marginBottom: 8 }}>
-        Seçilen kategori: {category}
+          {category}
       </Text>
 
       <View style={styles.timerRow}>
