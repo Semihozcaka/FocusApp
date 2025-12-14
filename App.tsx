@@ -3,8 +3,8 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemeProvider, ThemeContext } from './context/ThemeContext';
-import HomeScreenComponent from './screens/HomeScreen';
-import ReportsScreenComponent from './screens/ReportsScreen';
+import HomeScreen from './screens/HomeScreen';
+import ReportsScreen from './screens/ReportsScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -36,12 +36,12 @@ function NavigatorContent() {
       >
         <Tab.Screen
           name="Home"
-          component={HomeScreenComponent}
+          component={HomeScreen}
           options={{ title: 'Sayaç' }}
         />
         <Tab.Screen
           name="Reports"
-          component={ReportsScreenComponent}
+          component={ReportsScreen}
           options={{ title: 'Raporlar' }}
         />
       </Tab.Navigator>

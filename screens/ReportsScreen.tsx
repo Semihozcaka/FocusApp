@@ -7,7 +7,9 @@ import ThemeContext, { DarkTheme } from '../context/ThemeContext';
 import ThemeToggle from '../components/ThemeToggle';
 import { rgbaFromHex } from '../utils/helpers';
 import styles from '../styles/styles';
-
+ 
+// Raporlar ekranı: kayıtlı oturumları okuyup grafik ve istatistik gösterir.
+ 
 type FocusSession = {
   id: string;
   category: string;
@@ -18,7 +20,10 @@ type FocusSession = {
 
 const screenWidth = Dimensions.get('window').width;
 
+// Ekran genişliğini alıp grafik genişlik hesaplamaları için kullanılır.
+
 export default function ReportsScreen() {
+  // Tema bağlamından güncel tema bilgilerini alır.
   const themeContext = React.useContext(ThemeContext);
   const theme = themeContext?.theme || DarkTheme;
   const isDark = themeContext?.isDark || true;
@@ -27,6 +32,7 @@ export default function ReportsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const isFocused = useIsFocused();
 
+  // Kaydırma jestini dinleyerek soldan sağa kaydırma ile Ana sayfaya döner.
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 20 && Math.abs(g.dy) < 20,
@@ -36,6 +42,7 @@ export default function ReportsScreen() {
     }),
   ).current;
 
+  // AsyncStorage'dan kaydedilmiş oturum verilerini yükler.
   const loadSessions = async () => {
     try {
       const json = await AsyncStorage.getItem('sessions');
@@ -46,23 +53,28 @@ export default function ReportsScreen() {
     }
   };
 
+  // Ekran görünür olduğunda oturum verilerini yeniden yükler.
   useEffect(() => {
     if (isFocused) loadSessions();
   }, [isFocused]);
 
+  // Pull-to-refresh ile verileri yeniler.
   const onRefresh = async () => {
     setRefreshing(true);
     await loadSessions();
     setRefreshing(false);
   };
 
+  // Şu anki tarih ve gün karşılaştırma yardımcı fonksiyonları.
   const now = new Date();
 
   const isSameDay = (d1: Date, d2: Date) =>
     d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
 
+  // Bir ISO tarihinin bugün olup olmadığını kontrol eder.
   const isToday = (iso: string) => isSameDay(new Date(iso), now);
 
+  // Bugün ve tüm zamanlar için toplam süre ve dikkat dağınıklığı hesaplamaları.
   const todaySessions = sessions.filter(s => isToday(s.createdAt));
 
   const todaySeconds = todaySessions.reduce((sum, s) => sum + (s.durationSeconds || 0), 0);
@@ -74,6 +86,7 @@ export default function ReportsScreen() {
 
   const weekdayShort = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
 
+  // Son 7 gün için etiket ve günlük toplam dakika verisini hazırlar.
   const last7Days = Array.from({ length: 7 }).map((_, index) => {
     const d = new Date();
     d.setDate(now.getDate() - (6 - index));
@@ -92,6 +105,9 @@ export default function ReportsScreen() {
     datasets: [{ data: last7Days.map(d => (Number.isFinite(d.minutes) ? d.minutes : 0)) }],
   };
 
+  // Çubuk grafik için gereken veri yapısı.
+
+  // Kategori bazında toplam süreleri hesaplar.
   const categoryTotals: Record<string, number> = {};
   sessions.forEach(s => {
     const key = s.category || 'Diğer';
@@ -102,6 +118,7 @@ export default function ReportsScreen() {
 
   const pieEntries = Object.entries(categoryTotals).filter(([, seconds]) => seconds > 0);
 
+  // Pasta grafik için kategorilere göre veri dizisi oluşturur.
   const pieData = pieEntries.map(([cat, seconds], idx) => ({
     name: cat,
     population: seconds,
@@ -123,6 +140,9 @@ export default function ReportsScreen() {
     barPercentage: 0.55,
   };
 
+  // Grafiklerin renk, etiket ve görünüm ayarlarını içerir.
+
+  // UI: İstatistik kartları, çubuk grafik ve pasta grafiğini render eder.
   return (
     <ScrollView
       style={[styles.reportsContainer, { backgroundColor: theme.background }]}

@@ -7,14 +7,28 @@ import {
   Modal,
   AppState,
   PanResponder,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import { useNavigation } from '@react-navigation/native';
+import * as Haptics from 'expo-haptics';
+import * as Notifications from 'expo-notifications';
 import ThemeContext, { DarkTheme } from '../context/ThemeContext';
 import ThemeToggle from '../components/ThemeToggle';
 import { formatTime } from '../utils/helpers';
 import styles from '../styles/styles';
+
+// Bildirim ayarları - ön planda da gösterilsin
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
 
 type FocusSession = {
   id: string;
@@ -24,9 +38,14 @@ type FocusSession = {
   distractCount: number;
 };
 
+// Oturum verisi için TypeScript tip tanımı.
+
 const DEFAULT_MINUTES = 25;
 
+// Varsayılan sayaç süresi (dakika cinsinden).
+
 export default function HomeScreen() {
+  // Tema bağlamından güncel tema bilgilerini alır.
   const themeContext = React.useContext(ThemeContext);
   const theme = themeContext?.theme || DarkTheme;
   const navigation = useNavigation<any>();
@@ -41,6 +60,8 @@ export default function HomeScreen() {
 
   const appStateRef = useRef(AppState.currentState);
 
+  // AppState referansı: uygulama arka plana geçtiğinde dikkat dağınıklığını saymak için.
+
   // Swipe
   const panResponder = useRef(
     PanResponder.create({
@@ -51,6 +72,8 @@ export default function HomeScreen() {
       },
     }),
   ).current;
+
+  // Kaydırma jesti: sağa kaydırma ile Raporlar ekranına geçiş sağlar.
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', nextState => {
@@ -75,9 +98,12 @@ export default function HomeScreen() {
     return () => sub.remove();
   }, [isRunning, secondsLeft, workMinutes]);
 
+  // AppState dinleyicisi: uygulama arka plana geçince dikkat dağınıklığını ve duraklamayı yönetir.
+
   useEffect(() => {
     const load = async () => {
       try {
+        // AsyncStorage: seans verilerini yerel depodan okur.
         const json = await AsyncStorage.getItem('sessions');
         if (json) setSessions(JSON.parse(json));
       } catch (e) {
@@ -86,6 +112,8 @@ export default function HomeScreen() {
     };
     load();
   }, []);
+
+  // AsyncStorage'dan geçmiş seansları yükler.
 
   const saveCurrentSession = async (currentSecondsLeft: number) => {
     const durationSeconds = workMinutes * 60 - currentSecondsLeft;
@@ -102,12 +130,43 @@ export default function HomeScreen() {
     try {
       const updated = [...sessions, newSession];
       setSessions(updated);
+      // AsyncStorage: yeni seansı yerel depoya kaydeder.
       await AsyncStorage.setItem('sessions', JSON.stringify(updated));
     } catch (e) {
       console.log('saveSession error', e);
     }
 
     setDistractions(0);
+  };
+
+  // Geçerli seansı kaydeder ve dikkat dağınıklığı sayısını resetler.
+
+  // Bildirim izni iste
+  const requestNotificationPermission = async () => {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') {
+      await Notifications.requestPermissionsAsync();
+    }
+  };
+
+  useEffect(() => {
+    requestNotificationPermission();
+  }, []);
+
+  // Süre bitince bildirim gönder ve titret
+  const notifyTimerEnd = async () => {
+    // Titreşim
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    
+    // Push Notification
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '⏰ Süre Doldu!',
+        body: `${category} kategorisindeki odaklanma seansınız tamamlandı.`,
+        sound: true,
+      },
+      trigger: null, // Hemen gönder
+    });
   };
 
   // Timer
@@ -119,6 +178,12 @@ export default function HomeScreen() {
         if (prev <= 1) {
           clearInterval(intervalId);
           saveCurrentSession(prev);
+          notifyTimerEnd(); // Bildirim ve titreşim
+          setIsRunning(false);
+          // 2 saniye sonra sayacı başlangıç süresine döndür
+          setTimeout(() => {
+            setSecondsLeft(workMinutes * 60);
+          }, 2000);
           return 0;
         }
         return prev - 1;
@@ -126,7 +191,9 @@ export default function HomeScreen() {
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [isRunning]);
+  }, [isRunning, workMinutes]);
+
+  // Sayaç için interval kurar ve sayaç sona erdiğinde oturumu kaydeder.
 
   const handleStartPause = () => {
     if (secondsLeft === 0) {
@@ -136,6 +203,8 @@ export default function HomeScreen() {
     setIsRunning(prev => !prev);
   };
 
+  // Başlat/Duraklat butonuna basıldığında çalışır.
+
   const handleReset = () => {
     if (secondsLeft !== workMinutes * 60) {
       saveCurrentSession(secondsLeft);
@@ -144,6 +213,8 @@ export default function HomeScreen() {
     setIsRunning(false);
     setDistractions(0);
   };
+
+  // Sıfırla butonu: mevcut seansı kaydeder ve sayaçı resetler.
 
   const handleCategoryChange = (newCategory: string) => {
     if (isRunning) return;
@@ -156,6 +227,8 @@ export default function HomeScreen() {
     setCategory(newCategory);
   };
 
+  // Kategori değişikliği: sayaç çalışmıyorsa kategoriyi değiştirir ve mevcut seansı kaydeder.
+
   const changeWorkMinutes = (delta: number) => {
     if (isRunning) return;
     setWorkMinutes(prev => {
@@ -164,6 +237,8 @@ export default function HomeScreen() {
       return next;
     });
   };
+
+  // Süre ayar butonları: sayaç çalışmıyorsa süreyi artırıp azaltır.
 
   return (
     <View
